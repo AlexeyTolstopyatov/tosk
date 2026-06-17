@@ -10,10 +10,9 @@
 //! will be corrupted or zeroed at the moment of 1st page allocation.
 //! >> Go to the bootx64 module and set bounds of kernel image. (kernel entrypoint | size of image)
 //! >> After this -> go here -> pmm.init(boot) must reserve selection of pages where tosknl is located
-//! + pmm.lock(address, size); // must reserve segment by given address (and length)
-//! + pmm.unlock(address, size); // must return free state of selection (unreserve?? idk inglish)  
 const text = @import("text/debug.zig"); 
 const pmm = @import("mem/pmm.zig");
+const vmm = @import("mem/vmm.zig");
 const BootInfo = @import("boot/boot_info.zig").BootInfo;
 const intel = @import("protection.zig");
 const console = &@import("text/console.zig").console;
@@ -32,20 +31,25 @@ pub export fn kmain(boot: *BootInfo) callconv(.c) void {
     console.* = Console.init(boot) catch {
         kstop(&"VGA driver fault");
     };
-    console.clear();
-    console.printf("Now physical memory allocator and necessary protection will be set\n", .{});
+    console.printf("PMM initialized\n", .{});
+    //console.clear();
+    console.printf("Console service initialized!\n", .{});
     // Page Map (level 4) was allocated. It always prints "Page allocated 4096 bytes".
-    const page_map4 = pmm.alloc() orelse kstop(&"GDT/TSS page allocation fault"); // panic immediate. no fucking memory
-    intel.gdtInit(page_map4);
+    const gdt_page = pmm.alloc() orelse kstop(&"GDT/TSS page allocation fault");
+    intel.gdtInit(gdt_page);
     // Interrupt Descriptor Table initialization
     // After this procedure I also seeing how my virtual machine crashes and resets
     // but I know this is bad. Does it mean that IDT doesn't work correct? or what?
     // If i send an unknown character to Console.putChar -> VM falls with no reason? 
     // (but I've expected #GP/#PF) 
     intel.idtInit();
-    // Initialize console (VGA) minimal support (FS doesn't need. We're embed raster font in the data)
-    console.printf("Finally minimal Toska payload is ready\n", .{});
 
+    const pml4 = vmm.init(pmm.MAX_PHYS_ADDR) catch |err| {
+        console.printf("VMM init failed: {}\n", .{err});
+        kstop(&"VMM init failed");
+    };
+    console.printf("VMM initialized, PML4 @0x{X}\n", .{pml4}); 
+    
     while (true) {
         asm volatile("hlt");
     }

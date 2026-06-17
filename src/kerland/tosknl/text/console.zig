@@ -58,7 +58,7 @@ pub const Console = struct {
             .cursor_x = 0,
             .cursor_y = 0,
             .fg_color = 0xFFFFFFFF,
-            .bg_color = 0xFF0000FF, // was black
+            .bg_color = 0xFF0000FF,
             .scroll_y = 0,
         };
     }
@@ -174,9 +174,9 @@ pub const Console = struct {
         self.bg_color = hex;
     }
     pub fn clear(self: *Console) void {
-        for (0..self.height) |h| {
-            for (0..self.width) |w| {
-                self.drawCharacter(' ', @intCast(h), @intCast(w));
+        for (0..self.width) |w| {
+            for (0..self.height) |h| {
+                self.drawCharacter(' ', @intCast(w), @intCast(h));
             }
         }
     }

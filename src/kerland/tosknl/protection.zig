@@ -127,6 +127,7 @@ pub fn gdtInit(page: PhysicalAddress) void {
     // 
     // If gdt will be loaded successfully -> stack frame not breaks
     // and load_gdt returns correct into gdtInit (into Zig).
+    console.printf("GDT: @0x{X} (lim=0x{X})\n", .{gdtr.base, gdtr.limit});
     load_gdt(&gdtr);
 }
 /// Compares vector# and returns official mnemonic ASCII string
@@ -161,14 +162,7 @@ inline fn idtMnemonic(gate: u64) []const u8 {
 /// Handles interrupt: stops kernel execution. Set system in halt state 
 export fn kcheck(vector: u64) callconv(.c) noreturn {
     console.printf("\n** STOP **\n", .{});
-    console.printf(
-        \\This is a common interrupt handler message. 
-        \\Something happened and system has been stopped. Not all interrupt requests are means system fault
-        \\
-        \\Coffeelake, make it smarter!
-        \\
-    , .{});
-    console.printf("Code: 0x{X}", .{vector});
+    console.printf("Code: 0x{X} ", .{vector});
     
     if (vector < 0x20) {
         // It works but prints zeroes...
@@ -195,10 +189,11 @@ pub fn idtInit() void {
     }
 
     const idtr = Descriptor{
-        .limit = @sizeOf(@TypeOf(idt)) - 1,
+        .limit = @sizeOf(@TypeOf(idt)), // - 1,
         .base = @intFromPtr(&idt),
     };
 
     text.kprintbf("IDTR: limit={}, base=0x{x}\n", .{ idtr.limit, idtr.base });
+    console.printf("IDT: @0x{X} (lim=0x{X})\n", .{idtr.base, idtr.limit});
     load_idt(&idtr);
 }

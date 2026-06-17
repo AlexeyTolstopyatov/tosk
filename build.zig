@@ -123,11 +123,16 @@ fn buildKer(b: *std.Build) void {
     const nasm = NASM;
 
     const loader_src = "src/kerland/tosknl/protection.asm";
+    const vmm_src = "src/kerland/tosknl/mem/vmm.asm";
 
     _ = b.run(&[_][]const u8{
-        nasm, "-f", "win64", "-o", "protection.o", loader_src, // elf64
+        nasm, "-f", "win64", "-o", "protection.o", loader_src
+    });
+    _ = b.run(&[_][]const u8{
+        nasm, "-f", "win64", "-o", "vmm.o", vmm_src
     });
     module.addObjectFile(b.path("protection.o"));
+    module.addObjectFile(b.path("vmm.o"));
     // Finally: TOSKNL.EXE
     // Requirements: PE32+ executable under the NATIVE subsystem
     // (subsystem is missing). 

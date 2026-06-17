@@ -9,12 +9,13 @@ const text = @import("../text/debug.zig");
 pub const PhysicalAddress = u64;
 
 const PAGE_SIZE = 4096;
-const MAX_PHYS_ADDR: u64 = 0x100000000; // 4GB
+pub const MAX_PHYS_ADDR: u64 = 0x100000000; // 4GB
 const PHYSMAP_SIZE = (MAX_PHYS_ADDR / PAGE_SIZE + 7) / 8;
 
 var bitmap: [PHYSMAP_SIZE]u8 = .{0} ** PHYSMAP_SIZE;
 var total_pages: usize = 0;
 var last_alloc_page: usize = 0;
+
 /// Initializes physical memory allocator and puts 
 /// state in the debug port. (QEMU stdout) 
 pub fn init(boot: *BootInfo) void {
