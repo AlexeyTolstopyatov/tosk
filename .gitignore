@@ -1,0 +1,6 @@
+# Zig creates special folders where compilation results are store
+zig-cache
+zig-out/bin
+zig-out/lib
+# Object files same with results of compilation must be ignored by git
+*.o
