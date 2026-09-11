@@ -1,0 +1,13 @@
+//!
+//! Brings the interrupt subsystem online: remaps the PIC so hardware IRQs land
+//! on their remapped IDT vectors, then enables the CPU interrupt flag.
+//!
+const pic = @import("pic.zig");
+const cpu = @import("cpu.zig");
+
+pub fn init() void {
+    pic.remap();
+    cpu.sti();
+    // Unmask only IRQ0 (timer) after interrupts are enabled.
+    pic.unmask(0);
+}
