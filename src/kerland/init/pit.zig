@@ -40,7 +40,7 @@ pub fn sleep(ms: u64) void {
         if (now -% start >= ticks) {
             break;
         }
-        asm volatile ("hlt");
+        asm volatile("hlt");
     }
 }
 

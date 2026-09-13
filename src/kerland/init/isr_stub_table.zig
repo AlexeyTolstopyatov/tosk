@@ -31,7 +31,7 @@ pub const TrapFrame = extern struct {
 };
 
 comptime {
-    asm (
+    asm(
         \\.intel_syntax noprefix
         \\.global isr_common_stub
         \\isr_common_stub:
@@ -87,20 +87,22 @@ fn makeIsr(comptime i: u8) fn () callconv(.naked) void {
     return switch (i) {
         8, 10, 11, 12, 13, 14, 17, 21 => struct {
             fn handler() callconv(.naked) void {
-                asm volatile (
+                asm volatile(
                     \\ push %[idx]
                     \\ jmp isr_common_stub
-                    : : [idx] "n" (i),
+                    :
+                    : [idx] "n" (i),
                 );
             }
         }.handler,
         else => struct {
             fn handler() callconv(.naked) void {
-                asm volatile (
+                asm volatile(
                     \\ push 0
                     \\ push %[idx]
                     \\ jmp isr_common_stub
-                    : : [idx] "n" (i),
+                    :
+                    : [idx] "n" (i),
                 );
             }
         }.handler,
@@ -108,7 +110,9 @@ fn makeIsr(comptime i: u8) fn () callconv(.naked) void {
 }
 
 pub const isr_stub_table = blk: {
-    var table: [256]*const fn () callconv(.naked) void = undefined;
+    var table: [
+        256
+    ]*const fn () callconv(.naked) void = undefined;
     for (0..256) |i| {
         table[i] = makeIsr(@intCast(i));
     }

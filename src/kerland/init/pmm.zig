@@ -1,4 +1,4 @@
-const BootInfo = @import("bootinfo.zig").BootInfo;
+const FirmwareInterface = @import("fi.zig").FirmwareInterface;
 const uefi = @import("std").os.uefi;
 
 pub const MemoryKind = enum {
@@ -83,7 +83,7 @@ fn bitmapBase(regions: *MemoryMap, need: usize) usize {
 ///
 /// Initializes a physical memory allocator
 ///
-pub fn init(b: *BootInfo) void {
+pub fn init(b: *FirmwareInterface) void {
     var mmap: MemoryMap = .{};
     phys_max_address = getmem(
         &mmap,

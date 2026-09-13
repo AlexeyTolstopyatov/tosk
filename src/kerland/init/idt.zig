@@ -1,5 +1,5 @@
 //!
-//! x86-64 Interrupt Descriptor Table. 
+//! x86-64 Interrupt Descriptor Table.
 //!
 const log = @import("log.zig");
 const cpu = @import("cpu.zig");
@@ -29,14 +29,11 @@ const IdtEntry = packed struct {
 
     pub fn currentCS() u16 {
         // TODO: setup own GDT -> move init into 8 code segment
-        return asm ("mov %%cs, %[ret]" : [ret] "=r" (-> u16));
+        return asm("mov %%cs, %[ret]" : [ret] "=r" (->u16));
     }
 };
 
-const IdtPtr = packed struct {
-    limit: u16,
-    base: u64,
-};
+const IdtPtr = packed struct { limit: u16, base: u64 };
 
 var idt: [256]IdtEntry align(16) = undefined;
 
@@ -49,7 +46,8 @@ pub fn init() void {
         .base = @intFromPtr(&idt),
     };
 
-    asm volatile ("lidt (%[ptr])"
+    asm volatile(
+        "lidt (%[ptr])"
         :
         : [ptr] "r" (&idt_ptr),
     );
@@ -57,7 +55,9 @@ pub fn init() void {
 
 /// Dispatcher reached from every ISR stub. Routes to the relevant hardware
 /// handler; anything unknown is fatal.
-export fn isr_handler_zig(ctx: *isr_table.TrapFrame) callconv(.{ .x86_64_sysv = .{} }) u64 {
+export fn isr_handler_zig(
+    ctx: *isr_table.TrapFrame,
+) callconv(.{ .x86_64_sysv = .{} }) u64 {
     const vector = @as(u8, @truncate(ctx.int_num));
     switch (vector) {
         14 => {
@@ -76,13 +76,13 @@ export fn isr_handler_zig(ctx: *isr_table.TrapFrame) callconv(.{ .x86_64_sysv = 
 }
 
 fn pageFaultHandler(ctx: *isr_table.TrapFrame) void {
-    const cr2 = asm volatile ("mov %%cr2, %[ret]"
-        : [ret] "=r" (-> u64),
+    const cr2 = asm volatile(
+        "mov %%cr2, %[ret]"
+        : [ret] "=r" (->u64)
     );
     _ = cr2;
     _ = ctx;
     @panic("PAGE FAULT");
     // log.fail("[PAGE FAULT] Failed to access memory at: 0x{x}\n", .{cr2});
     // log.fail("-> [RIP]: 0x{x}, [ERROR_CODE] {d}\n", .{ ctx.rip, ctx.error_code });
-    
 }

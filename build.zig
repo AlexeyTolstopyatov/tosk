@@ -3,12 +3,7 @@ const std = @import("std");
 /// Build bootx64.efi
 fn buildBoot(b: *std.Build) void {
     const target = b.resolveTargetQuery(
-        .{
-            .cpu_model = .determined_by_arch_os,
-            .ofmt = .coff,
-            .cpu_arch = .x86_64,
-            .os_tag = .uefi,
-        },
+        .{ .ofmt = .coff, .cpu_arch = .x86_64, .os_tag = .uefi },
     );
 
     const elf_mod = b.createModule(
@@ -64,14 +59,6 @@ fn buildInit(b: *std.Build) void {
         .{ .cpu_arch = .x86_64, .os_tag = .freestanding },
     );
 
-    const bootinfo_mod = b.createModule(
-        .{
-            .root_source_file = b.path(
-                "src/kerland/boot/bootinfo.zig",
-            ),
-        },
-    );
-
     const mod = b.addModule(
         "init",
         .{
@@ -87,7 +74,6 @@ fn buildInit(b: *std.Build) void {
             .optimize = .ReleaseSmall,
         },
     );
-    mod.addImport("bootinfo", bootinfo_mod);
 
     const exec = b.addExecutable(
         .{
@@ -96,7 +82,7 @@ fn buildInit(b: *std.Build) void {
             .linkage = .static,
         },
     );
-    exec.setLinkerScript(b.path("src/kerland/init/linker.ld"));
+    exec.setLinkerScript(b.path("src/kerland/init/init.ld"));
     exec.pie = false;
 
     const init_step = b.addInstallArtifact(

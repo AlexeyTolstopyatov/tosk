@@ -79,8 +79,27 @@ pub fn main() uefi.Status {
     ) catch {
         return .device_error;
     };
+    // locate screen
+    var fb_base: *anyopaque = undefined;
+    var fb_width: u32 = 0;
+    var fb_height: u32 = 0;
+    const gop_guid = uefi.protocol.GraphicsOutput.guid;
+    var gop: *uefi.protocol.GraphicsOutput = undefined;
 
-    // --- locate ACPI 2.0 RSDP while boot services are still alive ---
+    if (
+        boot_services._locateProtocol(
+            &gop_guid,
+            null,
+            @ptrCast(&gop),
+        ) == .success
+    ) {
+        const mode_info = gop.mode.info;
+        fb_base = @ptrFromInt(gop.mode.frame_buffer_base);
+        fb_width = mode_info.horizontal_resolution;
+        fb_height = mode_info.vertical_resolution;
+    }
+
+    // locate ACPI 2.0 RSDP
     var rsdp_addr: u64 = 0;
     const config_tables = uefi.system_table.configuration_table;
     const num_tables = uefi.system_table.number_of_table_entries;
@@ -102,7 +121,7 @@ pub fn main() uefi.Status {
         }
     }
 
-    // --- open \init from the EFI System Partition ---
+    // open \init from esp
     const fs = boot_services.locateProtocol(
         uefi.protocol.SimpleFileSystem,
         null,
@@ -118,7 +137,7 @@ pub fn main() uefi.Status {
         return .not_found;
     };
 
-    // --- read the whole payload into a scratch pool buffer ---
+    // read the payload into a pool buffer
     const staging = boot_services.allocatePool(
         .loader_data,
         STAGING_SIZE,
@@ -149,7 +168,7 @@ pub fn main() uefi.Status {
 
     const image = staging[0..total];
 
-    // --- validate the ELF header and load every PT_LOAD segment ---
+    // validate the program header and load every PT_LOAD segment
     const hdr = elf.parseHeader(image) orelse return .load_error;
     for (0..hdr.phnum) |i| {
         const seg = elf.segmentAt(image, &hdr, @as(usize, i))
@@ -159,7 +178,7 @@ pub fn main() uefi.Status {
         if (status != .success) return status;
     }
 
-    // --- collect the physical memory map for the kernel ---
+    // collect the physical memory map for the kernel
     var map_buf_ptr = boot_services.allocatePool(
         .boot_services_data,
         0x4000,
@@ -169,7 +188,7 @@ pub fn main() uefi.Status {
     const memory_map = boot_services.getMemoryMap(map_buf)
         catch return .aborted;
 
-    // --- hand hardware control over to the freshly loaded image ---
+    // hand hardware control over to the freshly loaded image
     _ = boot_services.exitBootServices(
         uefi.handle,
         memory_map.info.key,
@@ -182,9 +201,11 @@ pub fn main() uefi.Status {
             * memory_map.info.descriptor_size,
         .desc_size = memory_map.info.descriptor_size,
         .rsdp_addr = @intCast(rsdp_addr),
+        .framebuffer_base = fb_base,
+        .framebuffer_height = fb_height,
+        .framebuffer_width = fb_width,
     };
 
-    // --- transfer control to the image entry point (never returns) ---
     const KernelEntryFn = *const fn (
         info: *FirmwareInterface,
     ) callconv(.{ .x86_64_sysv = .{} }) noreturn;

@@ -47,7 +47,7 @@ pub export fn main(
     idt.init();
     log.ok("IDT loaded", .{});
 
-    // PIC remap + sti (must happen after IDT is in place) 
+    // PIC remap + sti (must happen after IDT is in place)
     interrupts.init();
     log.ok("Interrupts enabled", .{});
 

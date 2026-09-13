@@ -38,8 +38,14 @@ pub fn remap() void {
     cpu.outb(PIC2_DATA, ICW4_8086);
     cpu.waitIO();
 
-    cpu.outb(PIC1_DATA, 0xFF);  // mask all IRQs on master initially
-    cpu.outb(PIC2_DATA, 0xFF);  // mask all IRQs on slave initially
+    cpu.outb(
+        PIC1_DATA,
+        0xFF,
+    ); // mask all IRQs on master initially
+    cpu.outb(
+        PIC2_DATA,
+        0xFF,
+    ); // mask all IRQs on slave initially
 }
 
 pub fn disable() void {
@@ -60,10 +66,12 @@ pub fn sendEoi(irq: u8) void {
 /// the corresponding handler is ready.
 pub fn unmask(irq: u8) void {
     if (irq < 8) {
-        const mask = cpu.inb(PIC1_DATA) & ~(@as(u8, 1) << @intCast(irq));
+        const mask = cpu.inb(PIC1_DATA)
+            & ~(@as(u8, 1) << @intCast(irq));
         cpu.outb(PIC1_DATA, mask);
     } else {
-        const mask = cpu.inb(PIC2_DATA) & ~(@as(u8, 1) << @intCast(irq - 8));
+        const mask = cpu.inb(PIC2_DATA)
+            & ~(@as(u8, 1) << @intCast(irq - 8));
         cpu.outb(PIC2_DATA, mask);
     }
 }

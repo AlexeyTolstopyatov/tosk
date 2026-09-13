@@ -1,0 +1,6 @@
+WARNING: Image format was not specified for 'json:{"fat-type": 0, "dir": "zig-out/img", "driver": "vvfat", "floppy": false, "rw": true, "write-target": {"driver": "qcow", "file": {"driver": "file", "filename": "C:\\Users\\atvlg\\AppData\\Local\\Temp/vl.HFILV3"}}}' and probing guessed raw.
+         Automatically detecting the format is dangerous for raw images, write operations on block 0 will be restricted.
+         Specify the 'raw' format explicitly to remove the restrictions.
+
+(qemu:16548): Gtk-WARNING **: 14:39:23.070: Could not load a pixbuf from /org/gtk/libgtk/theme/Adwaita/assets/bullet-symbolic.svg.
+This may indicate that pixbuf loaders or the mime database could not be found.
