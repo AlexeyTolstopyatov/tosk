@@ -3,7 +3,7 @@
 //! (0x3F8). This is the kernel's main debugging sink.
 //!
 const cpu = @import("cpu.zig");
-
+const bufPrint = @import("std").fmt.bufPrint;
 const COM1: u16 = 0x3F8;
 
 /// Sends a single byte, waiting for the output buffer to drain first.
@@ -20,3 +20,41 @@ pub fn print(str: []const u8) void {
         putChar(c);
     }
 }
+
+pub const SerialLogger = struct {
+    
+    fn emit(
+        comptime tag: []const u8,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) void {
+        var buf: [0x400]u8 = undefined;
+        const msg = bufPrint(&buf, fmt, args) catch "print error";
+        print(tag);
+        print(msg);
+        print("\n");
+    }
+    pub fn infof(comptime fmt: []const u8, args: anytype) void {
+        emit("[ INFO ] ", fmt, args);
+    }
+
+    pub fn okf(comptime fmt: []const u8, args: anytype) void {
+        emit("[  OK  ] ", fmt, args);
+    }
+
+    pub fn failf(comptime fmt: []const u8, args: anytype) void {
+        emit("[ FAIL ] ", fmt, args);
+    }
+
+    pub fn tracef(comptime fmt: []const u8, args: anytype) void {
+        emit("logger] ", fmt, args);
+    }
+
+    /// Bare println without a level tag.
+    pub fn println(comptime fmt: []const u8, args: anytype) void {
+        var buf: [0x400]u8 = undefined;
+        const msg = bufPrint(&buf, fmt, args) catch "print error";
+        print(msg);
+        print("\n");
+    }
+};

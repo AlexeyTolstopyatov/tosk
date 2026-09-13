@@ -1,8 +1,8 @@
 //!
 //! x86-64 Interrupt Descriptor Table.
 //!
-const log = @import("log.zig");
 const cpu = @import("cpu.zig");
+const serial = @import("serial.zig").SerialLogger;
 
 const isr_table = @import("isr_stub_table.zig");
 const pit = @import("pit.zig");
@@ -67,7 +67,7 @@ export fn isr_handler_zig(
             pit.handleIrq();
         },
         else => {
-            log.fail("Unhandled interrupt: {}", .{ctx.int_num});
+            serial.failf("Unhandled interrupt: {}", .{ctx.int_num});
             cpu.cli();
             while (true) cpu.hlt();
         },
