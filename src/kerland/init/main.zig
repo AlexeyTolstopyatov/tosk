@@ -47,15 +47,23 @@ pub export fn main(
     pit.init(100);
 
     const t0 = pit.getTicks();
-    video.infof("PIT test sleep 2 seconds via the timer\n", .{});
-    pit.sleep(2000);
+    video.infof("PIT test sleep 3 seconds via the timer\n", .{});
+    pit.sleep(3000);
     const t1 = pit.getTicks();
-    video.okf("2s sleep: {} ticks elapsed\n", .{t1 -% t0});
+    video.okf("3s sleep: {} ticks elapsed\n", .{t1 -% t0});
 
     video.infof("printing ticks once a second.\n", .{});
     while (true) {
         pit.sleep(100);
         video.printf("{} ", .{pit.getTicks()});
+
+        if (pit.getTicks() % 7 == 0) {
+            asm volatile(
+                \\.intel_syntax noprefix
+                \\ int 14
+            );
+        }
+
     }
 }
 /// 

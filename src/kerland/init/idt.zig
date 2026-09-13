@@ -3,6 +3,7 @@
 //!
 const cpu = @import("cpu.zig");
 const serial = @import("serial.zig").SerialLogger;
+const video = @import("video.zig").VideoLogger;
 
 const isr_table = @import("isr_stub_table.zig");
 const pit = @import("pit.zig");
@@ -80,9 +81,11 @@ fn pageFaultHandler(ctx: *isr_table.TrapFrame) void {
         "mov %%cr2, %[ret]"
         : [ret] "=r" (->u64)
     );
-    _ = cr2;
-    _ = ctx;
-    @panic("PAGE FAULT");
-    // log.fail("[PAGE FAULT] Failed to access memory at: 0x{x}\n", .{cr2});
-    // log.fail("-> [RIP]: 0x{x}, [ERROR_CODE] {d}\n", .{ ctx.rip, ctx.error_code });
+    video.failf("Failed to access memory at: 0x{x}\n", .{cr2});
+    video.tracef("{any}\n", .{ ctx.* });
+    
+    cpu.cli();
+    while (true) {
+        cpu.hlt();
+    }
 }
