@@ -55,15 +55,17 @@ pub fn disable() void {
     cpu.sti();
 }
 
-pub fn sendEoi(irq: u8) void {
+pub inline fn sendEoi(irq: u8) void {
     if (irq >= 8) {
         cpu.outb(PIC2_CMD, 0x20);
     }
     cpu.outb(PIC1_CMD, 0x20);
 }
 
+///
 /// Unmask a specific IRQ line. Use after interrupts are enabled and
 /// the corresponding handler is ready.
+///
 pub fn unmask(irq: u8) void {
     if (irq < 8) {
         const mask = cpu.inb(PIC1_DATA)

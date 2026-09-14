@@ -1,4 +1,5 @@
-extern fn init_isrh(frame: *TrapFrame) callconv(.c) u64;
+const video = @import("video.zig").VideoLogger;
+
 
 pub const TrapFrame = extern struct {
     rax: u64,
@@ -28,13 +29,17 @@ pub const TrapFrame = extern struct {
     rflags: u64,
     rsp: u64,
     ss: u64,
+
+    pub fn print(ctx: *TrapFrame) void {
+        _ = ctx;
+    }
 };
 
 comptime {
-    asm(
+    asm (
         \\.intel_syntax noprefix
-        \\.global isr_common_stub
-        \\isr_common_stub:
+        \\.global initCatchTrapContext
+        \\initCatchTrapContext:
         \\  push r15
         \\  push r14
         \\  push r13
@@ -53,7 +58,7 @@ comptime {
         \\
         \\  cld
         \\  mov rdi, rsp
-        \\  call isr_handler_zig
+        \\  call initCheckTrapContext
         \\
         \\  pop rax
         \\  pop rbx
@@ -89,7 +94,7 @@ fn makeIsr(comptime i: u8) fn () callconv(.naked) void {
             fn handler() callconv(.naked) void {
                 asm volatile(
                     \\ push %[idx]
-                    \\ jmp isr_common_stub
+                    \\ jmp initCatchTrapContext
                     :
                     : [idx] "n" (i),
                 );
@@ -100,7 +105,7 @@ fn makeIsr(comptime i: u8) fn () callconv(.naked) void {
                 asm volatile(
                     \\ push 0
                     \\ push %[idx]
-                    \\ jmp isr_common_stub
+                    \\ jmp initCatchTrapContext
                     :
                     : [idx] "n" (i),
                 );

@@ -14,6 +14,7 @@ pub const MemorySegment = struct {
     page_count: usize,
     type: MemoryKind,
 };
+pub const PhysicalAddress = usize;
 
 pub const MemoryMap = struct {
     regions: [512]MemorySegment = undefined,
@@ -148,7 +149,7 @@ pub fn getPageCount() usize {
 }
 
 /// Number of pages currently available for allocation (not including the bitmap).
-pub fn getFreePages() usize {
+pub fn getFreePagesCount() usize {
     return free_count;
 }
 

@@ -22,14 +22,14 @@ pub fn print(str: []const u8) void {
 }
 
 pub const SerialLogger = struct {
-    
     fn emit(
         comptime tag: []const u8,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
         var buf: [0x400]u8 = undefined;
-        const msg = bufPrint(&buf, fmt, args) catch "print error";
+        const msg = bufPrint(&buf, fmt, args)
+            catch |n| @errorName(n);
         print(tag);
         print(msg);
         print("\n");
@@ -45,15 +45,14 @@ pub const SerialLogger = struct {
     pub fn failf(comptime fmt: []const u8, args: anytype) void {
         emit("[ FAIL ] ", fmt, args);
     }
-
-    pub fn tracef(comptime fmt: []const u8, args: anytype) void {
-        emit("logger] ", fmt, args);
-    }
-
     /// Bare println without a level tag.
-    pub fn println(comptime fmt: []const u8, args: anytype) void {
+    pub fn println(
+        comptime fmt: []const u8,
+        args: anytype,
+    ) void {
         var buf: [0x400]u8 = undefined;
-        const msg = bufPrint(&buf, fmt, args) catch "print error";
+        const msg = bufPrint(&buf, fmt, args)
+            catch "print error";
         print(msg);
         print("\n");
     }

@@ -5,7 +5,7 @@ const cpu = @import("cpu.zig");
 const serial = @import("serial.zig").SerialLogger;
 const video = @import("video.zig").VideoLogger;
 
-const isr_table = @import("isr_stub_table.zig");
+const isrt = @import("isrt.zig");
 const pit = @import("pit.zig");
 
 const IdtEntry = packed struct {
@@ -40,7 +40,7 @@ var idt: [256]IdtEntry align(16) = undefined;
 
 pub fn init() void {
     for (0..256) |i| {
-        idt[i].set(isr_table.isr_stub_table[i]);
+        idt[i].set(isrt.isr_stub_table[i]);
     }
     const idt_ptr = IdtPtr{
         .limit = @as(u16, @sizeOf(@TypeOf(idt)) - 1),
@@ -54,21 +54,32 @@ pub fn init() void {
     );
 }
 
+///
 /// Dispatcher reached from every ISR stub. Routes to the relevant hardware
 /// handler; anything unknown is fatal.
-export fn isr_handler_zig(
-    ctx: *isr_table.TrapFrame,
+///
+export fn initCheckTrapContext(
+    ctx: *isrt.TrapFrame,
 ) callconv(.{ .x86_64_sysv = .{} }) u64 {
     const vector = @as(u8, @truncate(ctx.int_num));
     switch (vector) {
         14 => {
-            pageFaultHandler(ctx);
+            serial.println(
+                "trap frame located @ 0x{X}",
+                .{@intFromPtr(ctx)},
+            );
+            serial.println("truncated vec# {}", .{vector});
+
+            handlePageFault(ctx);
         },
         32 => {
             pit.handleIrq();
         },
         else => {
-            serial.failf("Unhandled interrupt: {}", .{ctx.int_num});
+            serial.failf(
+                "Default callback for unknown context {}",
+                .{vector},
+            );
             cpu.cli();
             while (true) cpu.hlt();
         },
@@ -76,14 +87,14 @@ export fn isr_handler_zig(
     return 0;
 }
 
-fn pageFaultHandler(ctx: *isr_table.TrapFrame) void {
+fn handlePageFault(ctx: *isrt.TrapFrame) void {
     const cr2 = asm volatile(
         "mov %%cr2, %[ret]"
         : [ret] "=r" (->u64)
     );
     video.failf("Failed to access memory at: 0x{x}\n", .{cr2});
-    video.tracef("{any}\n", .{ ctx.* });
-    
+    video.tracef("{any}\n", .{ctx.*});
+
     cpu.cli();
     while (true) {
         cpu.hlt();

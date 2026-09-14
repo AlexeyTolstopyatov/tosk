@@ -1,16 +1,50 @@
-//! Virtual memory allocator
-const std = @import("std");
+//!
+//! Virtual memory allocator.
+//!
+//! The VMM owns a x86-64 4-level page tree (PML4 -> PDP -> PD -> PT) on top of
+//! the physical allocator (`pmm`) and exposes two services:
+//!
+//!   1. `init()`  - builds an *identity* mapping (virt == phys) for the low
+//!                  physical range the running kernel still executes from
+//!                  (code, stack, PMM bitmap, video framebuffer), then switches
+//!                  CR3 to the freshly loaded tree.
+//!   2. `alloc()` - a linear (bump) heap in the *high half* address space.
+//!                  Every 4 KiB virtual page is backed by a fresh physical page
+//!                  taken from `pmm`, so virtual != physical: the heap is NOT an
+//!                  identity mapping.
+//!
 const pmm = @import("pmm.zig");
-const mem = @import("core.zig");
-const console = &@import("video.zig").Video;
-const PhysicalAddress = pmm.PhysicalAddress;
+const console = @import("video.zig").VideoLogger;
+
+pub const PhysicalAddress = pmm.PhysicalAddress;
 
 pub const PAGE_SIZE = 4096;
 pub const PAGE_SHIFT = 12;
 pub const ENTRIES_PER_TABLE = 512;
 
-extern fn vmm_invalidate_tlb(address: u64) void;
-extern fn vmm_set_pml4(address: u64) void;
+/// First canonical address of the upper half. The heap lives here, far away
+/// from the identity-mapped low region, so paging for it never collides with
+/// the huge (2 MB) pages used by the identity map.
+pub const HEAP_BASE: u64 = 0xFFFF800000000000;
+pub const HEAP_LENGTH: u64 = 128 * 1024 * 1024; // 128 MiB
+
+/// Flush the TLB entry for one canonical virtual address.
+fn vmm_invalidate_tlb(address: u64) void {
+    asm volatile (
+        "invlpg (%[addr])"
+        :
+        : [addr] "r" (address),
+    );
+}
+
+/// Load a physical PML4 address into CR3 (this also drops the whole TLB).
+fn setPml4(address: PhysicalAddress) void {
+    asm volatile (
+        "mov %[addr], %%cr3"
+        :
+        : [addr] "r" (address),
+    );
+}
 
 pub const PageFlags = struct {
     pub const PRESENT = 1 << 0;
@@ -57,7 +91,7 @@ pub const PageEntry = packed struct(u64) {
             .nx = (flags & PageFlags.NO_EXEC) != 0,
         };
     }
-    /// Returns a physical address of current page
+    /// Physical address this entry points at (frame * 4096).
     pub fn get(self: *const PageEntry) PhysicalAddress {
         return @as(PhysicalAddress, self.phys_addr) << 12;
     }
@@ -83,38 +117,52 @@ inline fn ptIndex(virt: u64) usize {
 
 var current_pml4_phys: PhysicalAddress = 0;
 
-var heap_start: u64 = 0x100000000; // ??? example, 4GB
-var heap_end: u64 = 0x200000000; // 8GB
-var heap_current: u64 = undefined;
+var heap_start: u64 = 0;
+var heap_end: u64 = 0;
+var heap_current: u64 = 0;
 
-/// Allocate space by given size in the heap address space.
-/// (Works like a pretty simple Bump Allocator)
+/// Wipe one whole physical page (used for freshly handed out page tables).
+fn zeroPage(phys: PhysicalAddress) void {
+    @memset(
+        @as([*]u8, @ptrFromInt(phys))[0..PAGE_SIZE],
+        0,
+    );
+}
+/// Allocate `size` bytes in the heap address space and back every 4 KiB chunk
+/// with its own fresh physical page. Works like a simple bump allocator.
 pub fn alloc(size: usize) ?[*]u8 {
-    // align address by the PAGE_SIZE bound
-    const aligned = (heap_current + 4095) & ~4095;
-    if (aligned + size > heap_end) return null;
+    if (size == 0) return null;
 
-    var address: PhysicalAddress = aligned;
-    while (address < (aligned + size)) : (address += PAGE_SIZE) {
-        const page = pmm.alloc() orelse return null;
+    const aligned = (heap_current + PAGE_SIZE - 1) & ~@as(u64, PAGE_SIZE - 1);
+    const pages_needed = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+    const total = @as(u64, pages_needed) * PAGE_SIZE;
+    if (aligned + total > heap_end) return null;
+
+    var addr = aligned;
+    var i: usize = 0;
+    while (i < pages_needed) : (i += 1) {
+        const phys = pmm.alloc() orelse return null;
         mapCurrent(
-            address,
-            page,
+            addr,
+            phys,
             PageFlags.PRESENT | PageFlags.WRITE,
-        );
+        ) catch return null;
+        addr += PAGE_SIZE;
     }
 
-    heap_current = aligned + size;
-    // Finally take a C-like array from the computed address
+    heap_current = aligned + total;
     return @as([*]u8, @ptrFromInt(aligned));
 }
-/// Release given space
+
+/// Release given space.
 // pub fn free(space: []u8) void {
 //     // Bump allocator doesn't need it.
 // }
-/// Returns a pointer to the record in the matching table for each virtual address
-/// If table is missing -> makes it (not PML4 which must be presented already!)
-/// Makes an "Identity Mapping"
+
+/// Walk/carve the tree and return the table entry that governs `virtual`.
+/// Intermediate tables that do not exist yet are allocated from the PMM.
+/// Descending through an entry whose `huge` bit is set (a huge page lower in
+/// the tree) is rejected: there is no smaller table to descend into.
 fn getPageEntry(
     _: enum { PML4, PDP, PD, PT },
     pml4_phys: PhysicalAddress,
@@ -122,191 +170,185 @@ fn getPageEntry(
 ) !*PageEntry {
     const pml4 = @as(*PML4, @ptrFromInt(pml4_phys));
     const pml4_idx = pml4Index(virtual);
-
     if (!pml4[pml4_idx].present) {
-        // make page directory (PDP)
-        const pdp_location = pmm.alloc()
-            orelse return error.OutOfMemory;
-
-        //@memset(@as([*]u8, @ptrFromInt(new_pdp)), 0, PAGE_SIZE);
-        mem.set(u8, @ptrFromInt(pdp_location), PAGE_SIZE, 0);
-
+        const page = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(page);
         pml4[pml4_idx] = PageEntry.init(
-            pdp_location,
+            page,
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
+    if (pml4[pml4_idx].huge) return error.MapUnderHugePage;
 
-    const pdp_location = pml4[pml4_idx].get();
-    const pdp = @as(*PDP, @ptrFromInt(pdp_location));
+    const pdp_phys = pml4[pml4_idx].get();
+    const pdp = @as(*PDP, @ptrFromInt(pdp_phys));
     const pdp_idx = pdpIndex(virtual);
-
     if (!pdp[pdp_idx].present) {
-        const pd_location = pmm.alloc()
-            orelse return error.OutOfMemory;
-        //@memset(@as([*]u8, @ptrFromInt(new_pd)), 0, PAGE_SIZE);
-        mem.set(u8, @ptrFromInt(pd_location), PAGE_SIZE, 0);
+        const page = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(page);
         pdp[pdp_idx] = PageEntry.init(
-            pd_location,
+            page,
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
+    if (pdp[pdp_idx].huge) return error.MapUnderHugePage; // 1 GiB page
 
-    const pd_location = pdp[pdp_idx].get();
-    const pd = @as(*PD, @ptrFromInt(pd_location));
+    const pd_phys = pdp[pdp_idx].get();
+    const pd = @as(*PD, @ptrFromInt(pd_phys));
     const pd_idx = pdIndex(virtual);
-
     if (!pd[pd_idx].present) {
-        const new_pt = pmm.alloc()
-            orelse return error.OutOfMemory;
-
-        //@memset(@as([*]u8, @ptrFromInt(new_pt)), 0);
-        mem.set(u8, @ptrFromInt(new_pt), PAGE_SIZE, 0);
-
+        const page = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(page);
         pd[pd_idx] = PageEntry.init(
-            new_pt,
+            page,
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
+    if (pd[pd_idx].huge) return error.MapUnderHugePage; // 2 MiB page
 
-    const pt_location = pd[pd_idx].get();
-    const pt = @as(*PT, @ptrFromInt(pt_location));
+    const pt_phys = pd[pd_idx].get();
+    const pt = @as(*PT, @ptrFromInt(pt_phys));
     const pt_idx = ptIndex(virtual);
-
     return &pt[pt_idx];
 }
-/// Map default page
+
+/// Map a default 4 KiB page.
 pub fn map4K(
     pml4_phys: PhysicalAddress,
     virtual: u64,
     phys: PhysicalAddress,
     flags: u64,
 ) !void {
-    // Give a PT record
     const pt_entry = try getPageEntry(.PT, pml4_phys, virtual);
     pt_entry.* = PageEntry.init(phys, flags);
     vmm_invalidate_tlb(virtual);
 }
 
-/// Mapping of `HUGE` page. (2MiB)
+/// Map a 2 MiB huge page (lives in the PD).
 pub fn map2M(
     pml4_phys: PhysicalAddress,
     virtual: u64,
     physical: PhysicalAddress,
     flags: u64,
 ) !void {
-    // 2MiB page means the record of PD with a HUGE flag.
-    // Walking through the pages: PAGE -> PDP -> PD
     const pml4 = @as(*PML4, @ptrFromInt(pml4_phys));
     const pml4_idx = pml4Index(virtual);
     if (!pml4[pml4_idx].present) {
-        const new_pdp = pmm.alloc()
-            orelse return error.OutOfMemory;
-        //@memset(@as([*]u8, @ptrFromInt(new_pdp)), 0, PAGE_SIZE);
-        mem.set(u8, @ptrFromInt(new_pdp), PAGE_SIZE, 0);
+        const page = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(page);
         pml4[pml4_idx] = PageEntry.init(
-            new_pdp,
+            page,
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
+
     const pdp_phys = pml4[pml4_idx].get();
     const pdp = @as(*PDP, @ptrFromInt(pdp_phys));
     const pdp_idx = pdpIndex(virtual);
     if (!pdp[pdp_idx].present) {
-        const new_pd = pmm.alloc()
-            orelse return error.OutOfMemory;
-        //@memset(@as([*]u8, @ptrFromInt(new_pd)), 0, PAGE_SIZE);
-        mem.set(u8, @ptrFromInt(new_pd), PAGE_SIZE, 0);
+        const page = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(page);
         pdp[pdp_idx] = PageEntry.init(
-            new_pd,
+            page,
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
+
     const pd_phys = pdp[pdp_idx].get();
     const pd = @as(*PD, @ptrFromInt(pd_phys));
     const pd_idx = pdIndex(virtual);
-    // Set a record in the page directory -> about HUGE page
     pd[pd_idx] = PageEntry.init(
         physical,
         flags | PageFlags.HUGE,
     );
     vmm_invalidate_tlb(virtual);
 }
-/// Initial identity mapping. It means that all virtual address space
-/// will be 1:1 with the physical memory map
-pub fn init(max_phys: PhysicalAddress) !PhysicalAddress {
-    // Identity mapping: от 0 до at least 1GB (0x40000000)
-    const identity_end = @max(max_phys, 0x40000000);
+/// Turn on paging with our own tree:
+///   * identity-map the low range [0, identity_end) with 2 MiB huge pages so the
+///     already running kernel (code, stack, PMM bitmap, framebuffer) stays
+///     reachable after CR3 is switched;
+///   * place the heap in the high half.
+pub fn init(
+    max_phys: PhysicalAddress,
+    fb_base: usize,
+    fb_len: usize,
+) !PhysicalAddress {
+    // Cover at least: all detected RAM, the video framebuffer, and 1 GiB.
+    const need = @max(
+        max_phys,
+        @max(fb_base + fb_len, 0x40000000),
+    );
+    const identity_end = @as(u64, (need + 0x1FFFFF) & ~@as(usize, 0x1FFFFF));
     console.printf(
-        "VMM: identity map 0 -> 0x{X}\n",
+        "mapping 0 -> 0x{X}\n",
         .{identity_end},
     );
 
-    // x86-64 4-level paging: PML4 -> PDP -> PD (2MB pages) -> PT (4KB)
-    // Fast identity mapping -> 2MB huge pages
-    //   PML4[0] -> PDP
-    //   PDP[i]  -> 2MB page (if i < identity_end / 0x200000)
-    //   PDP[i]  -> PD + PT
-    //
-    // PML4[0] -> PDP (1 стр.)
-    // PDP[0]  -> 1GB page (huge=1) covers 0..0x40000000
-    // Summary: 2 pages!
+    // PML4[0] -> PDP; each PDP[i] -> one PD covering 1 GiB; PD entries carry
+    // 2 MiB huge pages for the identity range.
+    const pml4_phys = pmm.alloc() orelse return error.OutOfMemory;
+    const pdp_phys = pmm.alloc() orelse return error.OutOfMemory;
+    zeroPage(pml4_phys);
+    zeroPage(pdp_phys);
 
-    const pml4 = pmm.alloc() orelse return error.OutOfMemory;
-    const pdp_page = pmm.alloc() orelse return error.OutOfMemory;
-
-    mem.set(u8, @ptrFromInt(pml4), PAGE_SIZE, 0);
-    mem.set(u8, @ptrFromInt(pdp_page), PAGE_SIZE, 0);
-    console.printf(
-        "VMM: PML4 @0x{X}, PDP @0x{X}\n",
-        .{ pml4, pdp_page },
-    );
-
-    // PML4[0] -> PDP (present, writeable)
-    const pml4_array: *volatile PML4 = @ptrFromInt(pml4);
-    pml4_array[0] = PageEntry.init(
-        pdp_page,
+    const pml4 = @as(*PML4, @ptrFromInt(pml4_phys));
+    const pdp = @as(*PDP, @ptrFromInt(pdp_phys));
+    pml4[0] = PageEntry.init(
+        pdp_phys,
         PageFlags.PRESENT | PageFlags.WRITE,
     );
-    console.printf("VMM: PML4[0] set\n", .{});
+    console.tracef("PML4 @ 0x{X}, PDP @ 0x{X}\n", .{ pml4_phys, pdp_phys });
 
-    // PDP[0..] -> 2MB huge pages для всего identity диапазона
-    const pdp_array: *volatile PDP = @ptrFromInt(pdp_page);
-    var addr: u64 = 0;
-    while (addr < identity_end) : (addr += 0x200000) {
-        const idx = pdpIndex(addr);
-        pdp_array[idx] = PageEntry.init(
-            addr,
-            PageFlags.PRESENT | PageFlags.WRITE | PageFlags.HUGE,
+    var chunk: usize = 0;
+    while (chunk < ENTRIES_PER_TABLE) : (chunk += 1) {
+        const chunk_base = @as(u64, chunk) * 0x40000000; // 1 GiB slot
+        if (chunk_base >= identity_end) break;
+
+        const pd_phys = pmm.alloc() orelse return error.OutOfMemory;
+        zeroPage(pd_phys);
+        const pd = @as(*PD, @ptrFromInt(pd_phys));
+        pdp[chunk] = PageEntry.init(
+            pd_phys,
+            PageFlags.PRESENT | PageFlags.WRITE,
         );
+
+        var entry: usize = 0;
+        while (entry < ENTRIES_PER_TABLE) : (entry += 1) {
+            const base = chunk_base + @as(u64, entry) * 0x200000; // 2 MiB
+            if (base >= identity_end) break;
+            pd[entry] = PageEntry.init(
+                @as(PhysicalAddress, base),
+                PageFlags.PRESENT | PageFlags.WRITE | PageFlags.HUGE,
+            );
+        }
     }
-    console.printf(
-        "VMM: mapped {} 2MB pages\n",
-        .{addr / 0x200000},
+
+    current_pml4_phys = pml4_phys;
+    setPml4(pml4_phys);
+    console.tracef(
+        "CR3 loaded, {} 2MB pages mapped\n",
+        .{identity_end / 0x200000},
     );
 
-    current_pml4_phys = pml4;
-    console.printf("VMM: loading CR3...\n", .{});
-    vmm_set_pml4(pml4);
-    console.printf("VMM: CR3 loaded\n", .{});
-
-    // Init memory heap
-    const heap = pmm.locateFree();
-    heap_start = heap.start * PAGE_SIZE;
-    heap_end = heap_start + (heap.count * PAGE_SIZE);
+    // Heap occupies the high (canonical) half, well clear of identity.
+    heap_start = HEAP_BASE;
+    heap_end = HEAP_BASE + HEAP_LENGTH;
     heap_current = heap_start;
-    console.printf(
-        "Heap location: 0x{X}-0x{X}\n",
+    console.tracef(
+        "Virtual heap range: 0x{X}-0x{X}\n",
         .{ heap_start, heap_end },
     );
-    return pml4;
+
+    return pml4_phys;
 }
-/// Write an address of another page in the CR3
+
+/// Point CR3 at another already-prepared page tree.
 pub fn switchToPml4(pml4_phys: PhysicalAddress) void {
-    vmm_set_pml4(pml4_phys);
+    setPml4(pml4_phys);
     current_pml4_phys = pml4_phys;
 }
 
+/// Map a 4 KiB page in the currently active tree.
 pub fn mapCurrent(
     virt: u64,
     phys: PhysicalAddress,

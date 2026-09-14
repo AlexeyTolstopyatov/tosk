@@ -26,7 +26,7 @@ pub fn init(f: u32) void {
 }
 
 /// Increments the software tick counter; called by the ISR and must be fast.
-pub fn handleIrq() void {
+pub inline fn handleIrq() void {
     _ = tick_count.fetchAdd(1, .monotonic);
     pic.sendEoi(0);
 }
