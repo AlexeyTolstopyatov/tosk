@@ -231,7 +231,7 @@ pub const Video = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        var buffer: [1024]u8 = undefined;
+        var buffer: [2048]u8 = undefined;
         const result = std.fmt.bufPrint(&buffer, fmt, args)
             catch unreachable;
 

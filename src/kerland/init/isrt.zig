@@ -29,10 +29,29 @@ pub const TrapFrame = extern struct {
     rflags: u64,
     rsp: u64,
     ss: u64,
-
+    //mint fmt: off
     pub fn print(ctx: *TrapFrame) void {
-        _ = ctx;
+        video.tracef(
+            \\rax {X:8}    r8  {X:8}    cs {X:4} rip {X:8}
+            \\rbx {X:8}    r9  {X:8}    ss {X:4} rsp {X:8}
+            \\rcx {X:8}    r10 {X:8}
+            \\rdx {X:8}    r11 {X:8}    rflags {X:8}
+            \\                r12 {X:8}    
+            \\rsi {X:8}    r13 {X:8}
+            \\rdi {X:8}    r14 {X:8}    vec#={}
+            \\rbp {X:8}    r15 {X:8}    err#={}
+            , .{
+                ctx.rax, ctx.r8, ctx.cs, ctx.rip,
+                ctx.rbx, ctx.r9, ctx.ss, ctx.rsp,
+                ctx.rcx, ctx.r10,
+                ctx.rdx, ctx.r11, ctx.rflags,
+                ctx.r12,
+                ctx.rsi, ctx.r13,
+                ctx.rdi, ctx.r14, ctx.int_num,
+                ctx.rbp, ctx.r15, ctx.error_code
+            });
     }
+    //mint fmt: on
 };
 
 comptime {
@@ -93,6 +112,7 @@ fn makeIsr(comptime i: u8) fn () callconv(.naked) void {
         8, 10, 11, 12, 13, 14, 17, 21 => struct {
             fn handler() callconv(.naked) void {
                 asm volatile(
+                    \\ push 0
                     \\ push %[idx]
                     \\ jmp initCatchTrapContext
                     :

@@ -10,6 +10,7 @@
 const pmm = @import("pmm.zig");
 const vmm = @import("vmm.zig");
 const cpu = @import("cpu.zig");
+const gdt = @import("gdt.zig");
 const idt = @import("idt.zig");
 const pit = @import("pit.zig");
 const video = @import("video.zig").VideoLogger;
@@ -41,6 +42,14 @@ pub export fn main(
             pmm.getFreePagesCount(),
         },
     );
+    gdt.init();
+    video.okf("GDT rewritten", .{});
+
+    serial.println(".kcode: 0x{X}", .{gdt.Selector.KCODE});
+    serial.println(".kdata: 0x{X}", .{gdt.Selector.KDATA});
+    serial.println(".ucode: 0x{X}", .{gdt.Selector.UCODE});
+    serial.println(".udata: 0x{X}", .{gdt.Selector.UDATA});
+    serial.println(".tasks: 0x{X}", .{gdt.Selector.TSS});
 
     // Virtual memory: enable paging on our own page tree, then prove the
     // non-identity heap works.
@@ -55,7 +64,7 @@ pub export fn main(
         while (true) cpu.hlt();
     };
     video.tracef("PML4 @ 0x{X}\n", .{pml4});
-    serial.println("paging enabled, PML4 @0x{X}", .{pml4});
+    serial.println("paging enabled, PML4 @ 0x{X}", .{pml4});
     testVMM();
 
     idt.init();
@@ -96,10 +105,10 @@ inline fn testPMM() void {
     // alloc/free round-trip: d == b2 -> {}
 
     if (d == b2) {
-        video.okf("pmm alloc/free round-trip (0x{X})\n", .{d});
+        video.okf("PMM alloc/free round-trip (0x{X})\n", .{d});
     } else {
         video.failf(
-            "memory pages were lost (0x{X}/0x{X})\n",
+            "Memory pages were lost (0x{X}/0x{X})\n",
             .{ d, b2 },
         );
         cpu.cli();
@@ -109,15 +118,17 @@ inline fn testPMM() void {
         }
     }
 
-    video.tracef("first/last pages: {} / {}\n", .{ a, c });
+    video.tracef("First/Last pages: {} / {}\n", .{ a, c });
     video.tracef(
-        "free pages now: {}\n",
+        "Free pages now: {}\n",
         .{pmm.getFreePagesCount()},
     );
 }
-/// Short test of the virtual (non-identity) heap. Allocates two buffers that
+/// 
+/// Short test of the virtual heap. Allocates two buffers that
 /// live above 0xFFFF800000000000 and are backed by physical pages from `pmm`,
 /// then round-trips a byte pattern through them.
+/// 
 inline fn testVMM() void {
     const a = vmm.alloc(512) orelse return;
     const b = vmm.alloc(16 * 4096) orelse return;
@@ -131,16 +142,16 @@ inline fn testVMM() void {
         and @intFromPtr(a) >= 0xFFFF800000000000
     ) {
         video.okf(
-            "alloc works: a=0x{X} b=0x{X}\n",
+            "VMM sucessfully allocated: a=0x{X} b=0x{X}\n",
             .{ @intFromPtr(a), @intFromPtr(b) },
         );
         serial.okf(
-            "alloc works: a=0x{X} b=0x{X}",
+            "VMM::alloc=0x{X} b=0x{X}",
             .{ @intFromPtr(a), @intFromPtr(b) },
         );
     } else {
-        video.failf("alloc test failed\n", .{});
-        serial.failf("alloc test failed", .{});
+        video.failf("VMM alloc test failed\n", .{});
+        serial.failf("VMM alloc test failed", .{});
         cpu.cli();
         while (true) cpu.hlt();
     }
