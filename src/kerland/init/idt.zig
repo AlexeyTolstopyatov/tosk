@@ -29,7 +29,7 @@ const IdtEntry = packed struct {
     }
 
     pub fn currentCS() u16 {
-        return asm("mov %%cs, %[ret]" : [ret] "=r" (-> u16));
+        return asm("mov %%cs, %[ret]" : [ret] "=r" (->u16));
     }
 };
 
@@ -69,10 +69,7 @@ export fn initCheckTrapContext(
             handleDoubleFault(ctx);
         },
         14 => {
-            serial.println(
-                "#PF",
-                .{},
-            );
+            serial.println("#PF", .{});
             serial.println("truncated vec# {}", .{vector});
 
             handlePageFault(ctx);

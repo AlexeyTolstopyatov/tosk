@@ -1,11 +1,11 @@
 //!
 //! 64-bit GDT/TSS.
 //!
-//! UEFI configures "unique" global descriptor table for to init the following 
+//! UEFI configures "unique" global descriptor table for to init the following
 //! boot/runtime services. The layout of UEFI isn't necessary, so against it
 //! 64-bit operating systems can have GDT too to cover incompatibility problems of firmware.
-//! 
-//! Starting from this the processes architecture will set. 
+//!
+//! Starting from this the processes architecture will set.
 //!
 pub const Selector = struct {
     pub const KCODE: u16 = 0x08; // index 1
@@ -25,10 +25,10 @@ const SegmentDescriptor = packed struct(u64) {
     hibase: u8 = 0,
 };
 
-/// 
+///
 /// 64-bit Task State Segment: IST1 is used by the #df handler
 /// Layout follows Intel Vol.3A, section 8.7.
-/// 
+///
 const Tss = packed struct {
     _res0: u32 = 0,
     rsp0: u64 = 0,
@@ -52,47 +52,50 @@ const Gdt = struct {
     tss_desc: [2]u64 = [_]u64{0} ** 2,
 };
 
-const GdtRegister = packed struct {
-    limit: u16,
-    base: u64,
-};
+const GdtRegister = packed struct { limit: u16, base: u64 };
 
 // 16 KiB dedicated stack for the #df handler via ist1.
 const double_fault_stack_size = 16384;
-var double_fault_stack: [double_fault_stack_size]u8 align(16) = undefined;
+var double_fault_stack: [double_fault_stack_size]u8
+    align(16) = undefined;
 
 var gdt: Gdt align(16) = .{};
 var task_state: Tss align(16) = .{};
 var gdtr: GdtRegister = undefined;
 
 fn getCodeDescriptor(access: u8) u64 {
-    return @bitCast(SegmentDescriptor{
-        .access = access,
-        .flags = 0xAF, // G=1, L=1, AVL=0, limit_hi=0xF
-    });
+    return @bitCast(
+        SegmentDescriptor{
+            .access = access,
+            .flags = 0xAF, // G=1, L=1, AVL=0, limit_hi=0xF
+        },
+    );
 }
 
 fn getDataDescriptor(access: u8) u64 {
-    return @bitCast(SegmentDescriptor{
-        .access = access,
-        .flags = 0xCF, // G=1, D=1, AVL=0, limit_hi=0xF
-    });
+    return @bitCast(
+        SegmentDescriptor{
+            .access = access,
+            .flags = 0xCF, // G=1, D=1, AVL=0, limit_hi=0xF
+        },
+    );
 }
 
 fn getTSSDescriptor(base: u64, size: usize) u128 {
     const limit = size - 1;
-    return (@as(u128, limit & 0xFFFF)) |
-        (@as(u128, base & 0xFFFF) << 16) |
-        (@as(u128, (base >> 16) & 0xFF) << 32) |
-        (@as(u128, 0x89) << 40) | // expecting P=1, DPL=0, type=available 64-bit TSS
-        (@as(u128, (limit >> 16) & 0x0F) << 48) |
-        (@as(u128, (base >> 24) & 0xFF) << 56) |
-        (@as(u128, (base >> 32) & 0xFFFFFFFF) << 64) |
-        (@as(u128, 0) << 96);
+    return (@as(u128, limit & 0xFFFF))
+        | (@as(u128, base & 0xFFFF) << 16)
+        | (@as(u128, (base >> 16) & 0xFF) << 32)
+        | (@as(u128, 0x89) << 40)
+        | // expecting P=1, DPL=0, type=available 64-bit TSS
+        (@as(u128, (limit >> 16) & 0x0F) << 48)
+        | (@as(u128, (base >> 24) & 0xFF) << 56)
+        | (@as(u128, (base >> 32) & 0xFFFFFFFF) << 64)
+        | (@as(u128, 0) << 96);
 }
 
 fn loadGdtr() void {
-    asm volatile (
+    asm volatile(
         "lgdt (%[gdtr])"
         :
         : [gdtr] "r" (&gdtr),
@@ -100,11 +103,11 @@ fn loadGdtr() void {
     );
 }
 
-/// 
+///
 /// Point the data/stack segment registers at our flat kernel data selector.
-/// 
+///
 fn reloadSegments() void {
-    asm volatile (
+    asm volatile(
         \\mov %[sel], %%ds
         \\mov %[sel], %%es
         \\mov %[sel], %%fs
@@ -116,11 +119,11 @@ fn reloadSegments() void {
     );
 }
 
-/// 
+///
 /// Far-return onto init code selector (CS == Selector.KCODE)
-/// 
+///
 fn reloadCs() void {
-    asm volatile (
+    asm volatile(
         \\pushq %[sel]
         \\lea 1f(%%rip), %%rax
         \\pushq %%rax
@@ -133,7 +136,7 @@ fn reloadCs() void {
 }
 
 fn loadTss() void {
-    asm volatile (
+    asm volatile(
         "ltr %[sel]"
         :
         : [sel] "r" (Selector.TSS),
@@ -141,10 +144,10 @@ fn loadTss() void {
     );
 }
 
-/// 
+///
 /// Setup the global descriptor table and task segment
 /// then switch the segment registers over.
-/// 
+///
 pub fn init() void {
     const tss_base: u64 = @as(u64, @intFromPtr(&task_state));
     const tss_size = @sizeOf(Tss);
@@ -160,7 +163,8 @@ pub fn init() void {
 
     task_state.ist1 = @as(
         u64,
-        @intFromPtr(&double_fault_stack) + double_fault_stack_size,
+        @intFromPtr(&double_fault_stack)
+            + double_fault_stack_size,
     );
 
     gdtr = .{

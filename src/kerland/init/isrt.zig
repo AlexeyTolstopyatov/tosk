@@ -1,6 +1,5 @@
 const video = @import("video.zig").VideoLogger;
 
-
 pub const TrapFrame = extern struct {
     rax: u64,
     rbx: u64,
@@ -29,7 +28,7 @@ pub const TrapFrame = extern struct {
     rflags: u64,
     rsp: u64,
     ss: u64,
-    //mint fmt: off
+    // mint fmt: off
     pub fn print(ctx: *TrapFrame) void {
         video.tracef(
             \\rax {X:8}    r8  {X:8}    cs {X:4} rip {X:8}
@@ -51,11 +50,11 @@ pub const TrapFrame = extern struct {
                 ctx.rbp, ctx.r15, ctx.error_code
             });
     }
-    //mint fmt: on
+    // mint fmt: on
 };
 
 comptime {
-    asm (
+    asm(
         \\.intel_syntax noprefix
         \\.global initCatchTrapContext
         \\initCatchTrapContext:

@@ -25,4 +25,8 @@ pub const FirmwareInterface = struct {
     framebuffer_width: u32,
     /// Defined by UEFI screen height
     framebuffer_height: u32,
+    /// Pointer to the font glyph bitmap kept in kernel-reserved memory.
+    font_map: [*]const u8,
+    /// Size in bytes of the font bitmap (invariant: 256 * 16 = 4096).
+    font_map_size: usize,
 };

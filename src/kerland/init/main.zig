@@ -57,7 +57,8 @@ pub export fn main(
         pmm.getMemorySize(),
         @intFromPtr(fi.framebuffer_base),
         @as(usize, fi.framebuffer_width)
-            * @as(usize, fi.framebuffer_height) * 4,
+            * @as(usize, fi.framebuffer_height)
+            * 4,
     ) catch {
         video.failf("VMM init failed\n", .{});
         cpu.cli();
@@ -75,12 +76,11 @@ pub export fn main(
 
     // PIT timer: fire IRQ0 at 100 Hz -> IDT vector 0x20
     video.tracef("Programming PIT at 100 Hz\n", .{});
-    
+
     pit.init(100);
     testPIT();
 
     video.infof("printing ticks once a second.\n", .{});
-
 
     while (true) {
         pit.sleep(100);
@@ -124,11 +124,11 @@ inline fn testPMM() void {
         .{pmm.getFreePagesCount()},
     );
 }
-/// 
+///
 /// Short test of the virtual heap. Allocates two buffers that
 /// live above 0xFFFF800000000000 and are backed by physical pages from `pmm`,
 /// then round-trips a byte pattern through them.
-/// 
+///
 inline fn testVMM() void {
     const a = vmm.alloc(512) orelse return;
     const b = vmm.alloc(16 * 4096) orelse return;
@@ -138,8 +138,8 @@ inline fn testVMM() void {
 
     if (
         a[0] == 0x11
-        and b[16 * 4096 - 1] == 0x22
-        and @intFromPtr(a) >= 0xFFFF800000000000
+            and b[16 * 4096 - 1] == 0x22
+            and @intFromPtr(a) >= 0xFFFF800000000000
     ) {
         video.okf(
             "VMM sucessfully allocated: a=0x{X} b=0x{X}\n",

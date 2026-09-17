@@ -67,6 +67,78 @@ fn loadSegment(
 
     return .success;
 }
+///
+/// Descriptor of the font bitmap loaded from disk and kept in kernel-reserved
+/// `.loader_data` memory. A plain (pointer, size) pair is returned instead of
+/// a slice so that no part of the result lives on the boot stack, whose frames
+/// are reused by the later `getMemoryMap` / `exitBootServices` calls.
+///
+pub const Font = struct { ptr: [*]const u8, size: usize };
+
+/// Size of the glyph bitmap (256 glyphs * 16 bytes), exactly one x86 page.
+const FONT_SIZE: usize = 0x1000;
+
+///
+/// Reads the font bitmap into `.loader_data` EFI memory.
+///
+/// `@embedFile` works but strips the customization feature: the bitmap is read
+/// from the firmware volume instead of being compiled in, so the glyph set can
+/// be replaced without rebuilding the bootloader.
+///
+/// The font file must be named `font.bin` and sit at the root of the EFI
+/// System Partition. It must contain 256 8x16 glyphs (4096 bytes in total);
+/// a truncated file, a missing file or an over-large file is an error.
+///
+pub fn installRaster(
+    b: *uefi.tables.BootServices,
+) uefi.Error!Font {
+    // 256 glyphs * 16 bytes always fills a single x86 page.
+    const fheap = b.allocatePool(.loader_data, FONT_SIZE)
+        catch |e| return e;
+
+    const fsp = b.locateProtocol(
+        uefi.protocol.SimpleFileSystem,
+        null,
+    )
+        catch |e| return e;
+
+    const root = fsp.?.openVolume() catch |e| return e;
+    defer root.close() catch {};
+
+    const font = root.open(
+        &[_:0]u16{ 'f', 'o', 'n', 't', '.', 'b', 'i', 'n' },
+        .read,
+        .{},
+    ) catch {
+        return error.NotFound;
+    };
+    defer font.close() catch {};
+
+    var total: usize = 0;
+    while (total < FONT_SIZE) {
+        const n = font.read(fheap[total..])
+            catch return error.DeviceError;
+        if (n == 0) break;
+        total += n;
+    }
+
+    // The buffer is full: probe one extra byte to prove the file fits exactly.
+    // Reaching the end is a success; reading past it means an oversized font.
+    if (total >= FONT_SIZE) {
+        var extra: [1]u8 = undefined;
+        if (
+            (font.read(&extra)
+                catch return error.DeviceError) != 0
+        ) {
+            return error.LoadError; // payload overflows the reserved page
+        }
+    }
+
+    // Zero the tail so a shorter-than-expected glyph set still renders cleanly.
+    @memset(fheap[total..], 0);
+
+    return Font{ .ptr = fheap.ptr, .size = total };
+}
 
 pub fn main() uefi.Status {
     const boot_services = uefi.system_table.boot_services
@@ -178,6 +250,13 @@ pub fn main() uefi.Status {
         if (status != .success) return status;
     }
 
+    const font = installRaster(boot_services) catch {
+        _ = con_out.outputString(
+            &[_:0]u16{ '!', '\n' },
+        ) catch {};
+        return .aborted;
+    };
+
     // collect the physical memory map for the kernel
     var map_buf_ptr = boot_services.allocatePool(
         .boot_services_data,
@@ -204,6 +283,8 @@ pub fn main() uefi.Status {
         .framebuffer_base = fb_base,
         .framebuffer_height = fb_height,
         .framebuffer_width = fb_width,
+        .font_map = font.ptr,
+        .font_map_size = font.size,
     };
 
     const KernelEntryFn = *const fn (

@@ -29,7 +29,7 @@ pub const HEAP_BASE: u64 = 0xFFFF800000000000;
 pub const HEAP_LENGTH: u64 = 128 * 1024 * 1024; // MiB
 
 fn invalidateTlb(address: u64) void {
-    asm volatile (
+    asm volatile(
         "invlpg (%[addr])"
         :
         : [addr] "r" (address),
@@ -38,7 +38,7 @@ fn invalidateTlb(address: u64) void {
 
 /// Load a physical PML4 address into CR3
 fn setPml4(address: PhysicalAddress) void {
-    asm volatile (
+    asm volatile(
         "mov %[addr], %%cr3"
         :
         : [addr] "r" (address),
@@ -122,17 +122,15 @@ var heap_current: u64 = 0;
 
 /// Fill physical page by zeros
 fn clearPage(phys: PhysicalAddress) void {
-    @memset(
-        @as([*]u8, @ptrFromInt(phys))[0..PAGE_SIZE],
-        0,
-    );
+    @memset(@as([*]u8, @ptrFromInt(phys))[0..PAGE_SIZE], 0);
 }
 /// Allocate `size` bytes in the heap address space and back every 4 KiB chunk
 /// with its own fresh physical page. Works like a simple bump allocator.
 pub fn alloc(size: usize) ?[*]u8 {
     if (size == 0) return null;
 
-    const aligned = (heap_current + PAGE_SIZE - 1) & ~@as(u64, PAGE_SIZE - 1);
+    const aligned = (heap_current + PAGE_SIZE - 1)
+        & ~@as(u64, PAGE_SIZE - 1);
     const pages_needed = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
     const total = @as(u64, pages_needed) * PAGE_SIZE;
     if (aligned + total > heap_end) return null;
@@ -145,7 +143,8 @@ pub fn alloc(size: usize) ?[*]u8 {
             addr,
             phys,
             PageFlags.PRESENT | PageFlags.WRITE,
-        ) catch return null;
+        )
+            catch return null;
         addr += PAGE_SIZE;
     }
 
@@ -157,7 +156,6 @@ pub fn alloc(size: usize) ?[*]u8 {
 // pub fn free(space: []u8) void {
 //     // Bump allocator doesn't need it.
 // }
-
 /// Walk/carve the tree and return the table entry that governs `virtual`.
 /// Intermediate tables that do not exist yet are allocated from the PMM.
 /// Descending through an entry whose `huge` bit is set (a huge page lower in
@@ -190,7 +188,8 @@ fn getPageEntry(
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
-    if (pdp[pdp_idx].huge) return error.MapUnderHugePage; // 1 GiB page
+    if (pdp[pdp_idx].huge)
+        return error.MapUnderHugePage; // 1 GiB page
 
     const pd_phys = pdp[pdp_idx].get();
     const pd = @as(*PD, @ptrFromInt(pd_phys));
@@ -203,7 +202,8 @@ fn getPageEntry(
             PageFlags.PRESENT | PageFlags.WRITE,
         );
     }
-    if (pd[pd_idx].huge) return error.MapUnderHugePage; // 2 MiB page
+    if (pd[pd_idx].huge)
+        return error.MapUnderHugePage; // 2 MiB page
 
     const pt_phys = pd[pd_idx].get();
     const pt = @as(*PT, @ptrFromInt(pt_phys));
@@ -277,7 +277,10 @@ pub fn init(
         max_phys,
         @max(fb_base + fb_len, 0x40000000),
     );
-    const identity_end = @as(u64, (need + 0x1FFFFF) & ~@as(usize, 0x1FFFFF));
+    const identity_end = @as(
+        u64,
+        (need + 0x1FFFFF) & ~@as(usize, 0x1FFFFF),
+    );
     video.printf(
         "VMM wants to map 0..0x{X} range\n",
         .{identity_end},
@@ -285,7 +288,8 @@ pub fn init(
 
     // PML4[0] -> PDP; each PDP[i] -> one PD covering 1 GiB; PD entries carry
     // 2 MiB huge pages for the identity range.
-    const pml4_phys = pmm.alloc() orelse return error.OutOfMemory;
+    const pml4_phys = pmm.alloc()
+        orelse return error.OutOfMemory;
     const pdp_phys = pmm.alloc() orelse return error.OutOfMemory;
     clearPage(pml4_phys);
     clearPage(pdp_phys);
@@ -296,14 +300,19 @@ pub fn init(
         pdp_phys,
         PageFlags.PRESENT | PageFlags.WRITE,
     );
-    video.tracef("PML4 @ 0x{X}, PDP @ 0x{X}\n", .{ pml4_phys, pdp_phys });
+    video.tracef(
+        "PML4 @ 0x{X}, PDP @ 0x{X}\n",
+        .{ pml4_phys, pdp_phys },
+    );
 
     var chunk: usize = 0;
     while (chunk < ENTRIES_PER_TABLE) : (chunk += 1) {
-        const chunk_base = @as(u64, chunk) * 0x40000000; // 1 GiB slot
+        const chunk_base = @as(u64, chunk)
+            * 0x40000000; // 1 GiB slot
         if (chunk_base >= identity_end) break;
 
-        const pd_phys = pmm.alloc() orelse return error.OutOfMemory;
+        const pd_phys = pmm.alloc()
+            orelse return error.OutOfMemory;
         clearPage(pd_phys);
         const pd = @as(*PD, @ptrFromInt(pd_phys));
         pdp[chunk] = PageEntry.init(
@@ -313,11 +322,14 @@ pub fn init(
 
         var entry: usize = 0;
         while (entry < ENTRIES_PER_TABLE) : (entry += 1) {
-            const base = chunk_base + @as(u64, entry) * 0x200000; // 2 MiB
+            const base = chunk_base
+                + @as(u64, entry) * 0x200000; // 2 MiB
             if (base >= identity_end) break;
             pd[entry] = PageEntry.init(
                 @as(PhysicalAddress, base),
-                PageFlags.PRESENT | PageFlags.WRITE | PageFlags.HUGE,
+                PageFlags.PRESENT
+                    | PageFlags.WRITE
+                    | PageFlags.HUGE,
             );
         }
     }
