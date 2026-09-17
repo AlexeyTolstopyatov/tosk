@@ -3,3 +3,4 @@
 /zig-out
 # Object files same with results of compilation must be ignored by git
 *.o
+*.log

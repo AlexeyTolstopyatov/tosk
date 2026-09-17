@@ -7,6 +7,7 @@ const video = @import("video.zig").VideoLogger;
 
 const isrt = @import("isrt.zig");
 const pit = @import("pit.zig");
+const kbd = @import("kbd.zig");
 
 const IdtEntry = packed struct {
     loffset: u16,
@@ -76,6 +77,9 @@ export fn initCheckTrapContext(
         },
         32 => {
             pit.handleIrq();
+        },
+        33 => {
+            kbd.handleIrq();
         },
         else => {
             serial.failf(

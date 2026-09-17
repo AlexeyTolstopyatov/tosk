@@ -8,6 +8,7 @@ const cpu = @import("cpu.zig");
 pub fn init() void {
     pic.remap();
     cpu.sti();
-    // Unmask only IRQ0 (timer) after interrupts are enabled.
+    // Unmask IRQ0 (timer) and IRQ1 (keyboard) after interrupts are enabled.
     pic.unmask(0);
+    pic.unmask(1);
 }

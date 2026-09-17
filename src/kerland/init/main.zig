@@ -14,10 +14,12 @@ const gdt = @import("gdt.zig");
 const idt = @import("idt.zig");
 const pit = @import("pit.zig");
 const video = @import("video.zig").VideoLogger;
+const std = @import("std");
 
 const Video = @import("video.zig").Video;
 const serial = @import("serial.zig").SerialLogger;
 const interrupts = @import("interrupts.zig");
+const kbd = @import("kbd.zig");
 
 const FirmwareInterface = @import("fi.zig").FirmwareInterface;
 
@@ -31,7 +33,6 @@ pub export fn main(
     );
 
     pmm.init(fi);
-
     testPMM();
 
     video.okf(
@@ -43,16 +44,8 @@ pub export fn main(
         },
     );
     gdt.init();
-    video.okf("GDT rewritten", .{});
+    video.okf("GDT rewritten\n", .{});
 
-    serial.println(".kcode: 0x{X}", .{gdt.Selector.KCODE});
-    serial.println(".kdata: 0x{X}", .{gdt.Selector.KDATA});
-    serial.println(".ucode: 0x{X}", .{gdt.Selector.UCODE});
-    serial.println(".udata: 0x{X}", .{gdt.Selector.UDATA});
-    serial.println(".tasks: 0x{X}", .{gdt.Selector.TSS});
-
-    // Virtual memory: enable paging on our own page tree, then prove the
-    // non-identity heap works.
     const pml4 = vmm.init(
         pmm.getMemorySize(),
         @intFromPtr(fi.framebuffer_base),
@@ -66,11 +59,11 @@ pub export fn main(
     };
     video.tracef("PML4 @ 0x{X}\n", .{pml4});
     serial.println("paging enabled, PML4 @ 0x{X}", .{pml4});
+
     testVMM();
 
-    idt.init();
-
     // PIC remap + sti (must happen after IDT is in place)
+    idt.init();
     interrupts.init();
     video.okf("Interrupts restored\n", .{});
 
@@ -80,12 +73,84 @@ pub export fn main(
     pit.init(100);
     testPIT();
 
-    video.infof("printing ticks once a second.\n", .{});
+    video.infof("keyboard ready. type 'help'.\n", .{});
+
+    var line: [80]u8 = undefined;
+    var nline: usize = 0;
+    //var last_tick: u64 = 0;
 
     while (true) {
-        pit.sleep(100);
-        video.printf("{}\n", .{pit.getTicks()});
+        // 10 ms poll window; ticks keep firing in the background at 100 Hz.
+        pit.sleep(10);
+
+        // Echo keyboard characters into the line buffer and run commands.
+        while (kbd.poll()) |c| {
+            switch (c) {
+                0x08 => { // backspace: drop one char and redraw prompt + line
+                    if (nline > 0) {
+                        nline -= 1;
+                        video.printf(
+                            "\r{s} ",
+                            .{line[0..nline]},
+                        );
+                    }
+                },
+                '\n' => {
+                    video.printf("\n", .{});
+                    runCommand(line[0..nline]);
+                    nline = 0;
+                    video.printf("> ", .{});
+                },
+                else => {
+                    if (nline < line.len) {
+                        line[nline] = c;
+                        nline += 1;
+                    }
+                    video.printf(
+                        "> {s}{c}",
+                        .{ line[0..nline], c },
+                    );
+                },
+            }
+        }
+
+        // spam of ticks.
+        // const now = pit.getTicks();
+        // if (now -% last_tick >= 10) {
+        //     last_tick = now;
+        //     video.printf("[tick {}]\n", .{now});
+        // }
+    }
+}
+///
+/// Runtime test of the #PF trap path. Called by the interactive `pf` command:
+/// it deliberately executes `int 14`, whose handler dumps the TrapFrame and
+/// halts. QEMU's `info registers` output should agree with the printed frame.
+///
+inline fn testPFh() void {
+    asm volatile(
+        \\.intel_syntax noprefix
+        \\ int 14
+    );
+}
+///
+/// Tiny interactive command dispatcher feeding off the keyboard line buffer.
+///
+fn runCommand(line: []const u8) void {
+    if (std.mem.eql(u8, line, "help")) {
+        video.infof("commands: help, ticks, clear, pf\n", .{});
+    } else if (std.mem.eql(u8, line, "ticks")) {
+        video.printf("ticks: {}\n", .{pit.getTicks()});
+    } else if (std.mem.eql(u8, line, "clear")) {
+        @import("video.zig").monitor.clear();
+    } else if (std.mem.eql(u8, line, "pf")) {
+        video.infof(
+            "triggering #PF (int 14) trap-frame test\n",
+            .{},
+        );
         testPFh();
+    } else if (line.len > 0) {
+        video.printf("unknown command: '{s}'\n", .{line});
     }
 }
 ///
@@ -166,22 +231,4 @@ inline fn testPIT() void {
     pit.sleep(3000);
     const t1 = pit.getTicks();
     video.okf("3s sleep: {} ticks elapsed\n", .{t1 -% t0});
-}
-///
-/// Short test of page fault handler procedure.
-/// Calls when was IDT configured already to check the trap frame
-/// alignment limits.
-///
-/// Test will be passed if QEMU `info registers` command and TrapFrame
-/// data are the same.
-/// For else Trap frame collects missinformation -> internal debugger
-/// will work incorrect
-///
-inline fn testPFh() void {
-    if (pit.getTicks() % 7 == 0) {
-        asm volatile(
-            \\.intel_syntax noprefix
-            \\ int 14
-        );
-    }
 }

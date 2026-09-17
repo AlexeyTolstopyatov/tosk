@@ -298,4 +298,8 @@ pub const VideoLogger = struct {
         monitor.fg_color = COLOR_TRACE;
         monitor.printf(fmt, args);
     }
+
+    pub fn slideClear() void {
+        monitor.clear();
+    }
 };

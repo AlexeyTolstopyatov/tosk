@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Continue"
-$out = "d:\Locals\tosk\serial2.log"
-$err = "d:\Locals\tosk\qerr2.txt"
+$out = "d:\Locals\tosk\serial.log"
+$err = "d:\Locals\tosk\debug.log"
 if (Test-Path $out) { Remove-Item $out }
 if (Test-Path $err) { Remove-Item $err }
 
