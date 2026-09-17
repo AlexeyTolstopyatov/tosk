@@ -74,6 +74,7 @@ pub export fn main(
     testPIT();
 
     video.infof("keyboard ready. type 'help'.\n", .{});
+    video.printf("> ", .{});
 
     var line: [80]u8 = undefined;
     var nline: usize = 0;
@@ -86,12 +87,16 @@ pub export fn main(
         // Echo keyboard characters into the line buffer and run commands.
         while (kbd.poll()) |c| {
             switch (c) {
-                0x08 => { // backspace: drop one char and redraw prompt + line
+                0x08 => { // backspace: drop one char; redraw the prompt + line cleanly
                     if (nline > 0) {
                         nline -= 1;
+                        // \r -> column 0, reprint "> {s} " (a space wipes the
+                        // leftover glyph), then \r again and "> {s} " without
+                        // the trailing space so the cursor ends right after the
+                        // last char.
                         video.printf(
-                            "\r{s} ",
-                            .{line[0..nline]},
+                            "\r> {s} \r> {s}",
+                            .{ line[0..nline], line[0..nline] },
                         );
                     }
                 },
@@ -106,10 +111,10 @@ pub export fn main(
                         line[nline] = c;
                         nline += 1;
                     }
-                    video.printf(
-                        "> {s}{c}",
-                        .{ line[0..nline], c },
-                    );
+                    // Prompt and already-typed text are on screen; print only the
+                    // freshly typed character. Re-printing "> {s}{c}" here would
+                    // stack "> " copies on the same line.
+                    video.printf("{c}", .{c});
                 },
             }
         }

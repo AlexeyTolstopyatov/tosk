@@ -1,4 +1,5 @@
 const std = @import("std");
+const cpu = @import("cpu.zig");
 const FirmwareInterface = @import("fi.zig").FirmwareInterface;
 
 pub var monitor: Video = undefined;
@@ -17,6 +18,9 @@ pub fn isActive() bool {
 /// Emits a whole string through the global `console`; a no-op while inactive.
 pub fn print(str: []const u8) void {
     if (!isActive()) return;
+    const saved = cpu.flags();
+    cpu.cli();
+    defer if ((saved & cpu.INTERRUPT_FLAG) != 0) cpu.sti();
     for (str) |c| monitor.putChar(c);
 }
 
@@ -228,6 +232,14 @@ pub const Video = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) void {
+        // Render the whole message with interrupts masked so a PIT/PS2 ISR can
+        // never splice bytes into a half-drawn line or corrupt the shared
+        // framebuffer state. Restore the previous interrupt state afterwards:
+        // a print issued from an ISR keeps interrupts masked.
+        const saved = cpu.flags();
+        cpu.cli();
+        defer if ((saved & cpu.INTERRUPT_FLAG) != 0) cpu.sti();
+
         var buffer: [2048]u8 = undefined;
         const result = std.fmt.bufPrint(&buffer, fmt, args)
             catch unreachable;

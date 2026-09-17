@@ -1,5 +1,6 @@
 const FirmwareInterface = @import("fi.zig").FirmwareInterface;
 const uefi = @import("std").os.uefi;
+const sync = @import("sync.zig");
 
 pub const MemoryKind = enum {
     Free,
@@ -38,17 +39,9 @@ var free_count: usize = 0;
 // Base of the region that holds the bitmap (kept for debugging / accounting).
 var free_start: usize = 0;
 
-// Single spinlock guarding the allocator. On a single core the first `xchg`
-// wins immediately, so it is effectively a no-op until SMP lands.
-var lock_: u8 = 0;
-
-fn lock() void {
-    while (@atomicRmw(u8, &lock_, .Xchg, 1, .seq_cst) != 0) {}
-}
-
-fn unlock() void {
-    @atomicStore(u8, &lock_, 0, .seq_cst);
-}
+// Single spinlock guarding the allocator. On a single core it is effectively
+// free; the same primitive keeps the allocator correct once SMP lands.
+var alloc_lock: sync.Spinlock = .{};
 
 // Free-list plumbing. The next free page's address is stored at the start of
 // each free page, so we read/write an unaligned `usize` at the page base.
@@ -196,35 +189,35 @@ fn setSegment(start: usize, len: usize) void {
 }
 
 pub fn alloc() ?usize {
-    lock();
+    alloc_lock.lock();
     if (free_head == 0) {
-        unlock();
+        alloc_lock.unlock();
         return null; // out of physical page frames
     }
     const page = free_head;
     free_head = nextOf(page);
     free_count -= 1;
     set(page / 4096);
-    unlock();
+    alloc_lock.unlock();
     return page;
 }
 
 pub fn free(page: usize) void {
-    lock();
+    alloc_lock.lock();
     const pagei = page / 4096;
     if (pagei >= pages) {
-        unlock();
+        alloc_lock.unlock();
         return;
     }
     if (!@"test"(pagei)) {
-        unlock();
+        alloc_lock.unlock();
         return; // already free -> ignore double free
     }
     setNext(page, free_head);
     free_head = page;
     free_count += 1;
     reset(pagei);
-    unlock();
+    alloc_lock.unlock();
 }
 
 fn getmem(

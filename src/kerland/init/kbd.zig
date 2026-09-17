@@ -12,14 +12,14 @@ const cpu = @import("cpu.zig");
 const pic = @import("pic.zig");
 
 /// Status register
-const KBD_STATUS = 0x64; // (bit 0 = output buffer full)
+const SR = 0x64; // (bit 0 = output buffer full)
 /// Data register
-const KBD_DATA = 0x60;
+const DR = 0x60;
 
 /// Capacity of the type-ahead ring buffer, in characters.
-const KEYBUF_SIZE = 256;
+const BUFFER_SIZE = 256;
 
-var buf: [KEYBUF_SIZE]u8 = undefined;
+var buf: [BUFFER_SIZE]u8 = undefined;
 var head: usize = 0; // next char to read
 var tail: usize = 0; // next slot to fill
 
@@ -78,10 +78,10 @@ const shifted: [128]u8 = blk: {
 /// Append a character to the ring buffer, dropping the oldest entry when full.
 fn push(c: u8) void {
     buf[tail] = c;
-    tail = (tail + 1) % KEYBUF_SIZE;
+    tail = (tail + 1) % BUFFER_SIZE;
     if (tail == head) {
         // Buffer overflow: oldest byte is overwritten.
-        head = (head + 1) % KEYBUF_SIZE;
+        head = (head + 1) % BUFFER_SIZE;
     }
 }
 
@@ -130,8 +130,8 @@ fn translate(sc: u8) void {
 /// Must stay short and non-blocking.
 pub inline fn handleIrq() void {
     // Drain every pending scancode; the controller may have queued several.
-    while ((cpu.inb(KBD_STATUS) & 0x01) != 0) {
-        const sc = cpu.inb(KBD_DATA);
+    while ((cpu.inb(SR) & 0x01) != 0) {
+        const sc = cpu.inb(DR);
         translate(sc);
     }
     pic.sendEoi(1);
@@ -141,6 +141,6 @@ pub inline fn handleIrq() void {
 pub fn poll() ?u8 {
     if (head == tail) return null;
     const c = buf[head];
-    head = (head + 1) % KEYBUF_SIZE;
+    head = (head + 1) % BUFFER_SIZE;
     return c;
 }

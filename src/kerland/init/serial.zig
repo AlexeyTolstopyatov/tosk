@@ -13,8 +13,12 @@ pub fn putChar(c: u8) void {
 }
 
 /// Emits a whole string. `\n` is expanded to CRLF because a bare line feed
-/// does not move the caret on a real terminal / serial monitor.
+/// does not move the caret on a real terminal / serial monitor. Interrupts are
+/// masked for the duration so an ISR cannot interleave its own bytes.
 pub fn print(str: []const u8) void {
+    const saved = cpu.flags();
+    cpu.cli();
+    defer if ((saved & cpu.INTERRUPT_FLAG) != 0) cpu.sti();
     for (str) |c| {
         if (c == '\n') putChar('\r');
         putChar(c);

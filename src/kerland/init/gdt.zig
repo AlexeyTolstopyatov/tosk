@@ -59,6 +59,13 @@ const double_fault_stack_size = 16384;
 var double_fault_stack: [double_fault_stack_size]u8
     align(16) = undefined;
 
+// 16 KiB kernel stack. Its top is published as TSS.rsp0: it is loaded by the
+// CPU on every privilege drop (ring 3 -> ring 0) before the handler runs, so
+// usermode cannot corrupt the stack the kernel resumes on.
+const kernel_stack_size = 16384;
+var kernel_stack: [kernel_stack_size]u8
+    align(16) = undefined;
+
 var gdt: Gdt align(16) = .{};
 var task_state: Tss align(16) = .{};
 var gdtr: GdtRegister = undefined;
@@ -165,6 +172,10 @@ pub fn init() void {
         u64,
         @intFromPtr(&double_fault_stack)
             + double_fault_stack_size,
+    );
+    task_state.rsp0 = @as(
+        u64,
+        @intFromPtr(&kernel_stack) + kernel_stack_size,
     );
 
     gdtr = .{
